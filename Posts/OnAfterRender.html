@@ -25,11 +25,11 @@
 
 	<title>The Trouble with OnAfterRender</title>
         <meta property="author" content="Shaun Curtis" />
-        <meta property="description" content="Why you should use OnAfterRender to do all sorts of things in the component rnedering process." />
+        <meta property="description" content="Why you shouldn&#x27;t use OnAfterRender to mutate the state of a component." />
     <meta property="og:site_name" content="Cold Elm Coders" />
         <meta property="og:site" content="https://shauncurtis.github.io/" />
         <meta property="og:title" content="The Trouble with OnAfterRender" />
-        <meta property="og:description" content="Why you should use OnAfterRender to do all sorts of things in the component rnedering process." /></head>
+        <meta property="og:description" content="Why you shouldn&#x27;t use OnAfterRender to mutate the state of a component." /></head>
 <body><header class="navbar bg-dark p-2 text-large text-light"><section class="navbar-section  text-light"><a href="/" class="navbar-brand mr-2 text-large text-light p-2">Cold Elm Coders</a>
 			<a href="/Posts/index.html" class="btn btn-link text-light">Posts</a>
 			<a href="/Rants/index.html" class="btn btn-link text-light">Rants</a>
@@ -54,7 +54,13 @@
 <a class="TOC-link" href="#an-idle-synchronisation-context">An Idle Synchronisation Context</a>
 </li>
 <li class="TOC-item TOC-item-2" >
-<a class="TOC-link" href="#the-demo-component">The Demo Component</a>
+<a class="TOC-link" href="#pre-rendering">Pre-Rendering</a>
+</li>
+<li class="TOC-item TOC-item-2" >
+<a class="TOC-link" href="#takeaways">Takeaways</a>
+</li>
+<li class="TOC-item TOC-item-2" >
+<a class="TOC-link" href="#appendix-the-demo-component">Appendix - The Demo Component</a>
 </li>
 </ul>
 </li>
@@ -64,20 +70,20 @@
 </div>
 			
 			<div class="col-12 col-sm-9 col-lg-10 p-2"><div class="pt-2 pb-2 border-bottom mb-4 text-primary"><h1>The Trouble with OnAfterRender</h1>
-            <div><small>Why you should use OnAfterRender to do all sorts of things in the component rnedering process.</small></div></div>
-    <p>In my opinion 95+% of code in <code>OnAfterRender{Async}</code> shouldn't be there.  In this article I'll explain why.</p>
+            <div><small>Why you shouldn&#x27;t use OnAfterRender to mutate the state of a component.</small></div></div>
+    <p>In my [humble] opinion, 90+% of code in <code>OnAfterRender{Async}</code> shouldn't be there.  In this article I'll explain why.</p>
 <p>So, what should be there?</p>
-<p>JSInterop code.  If your code needs to interact with the browser through JS, then that code belongs here.</p>
-<p>Before we jump into the code some important relevant facts.</p>
+<p>JSInterop code.  That's about it.  If your code needs to interact with the browser through JS, then it's in the right place.</p>
+<p>Before jumping into the code, some important relevant facts:</p>
 <ol>
 <li><p><code>OnAfterRender{Async}</code> is a UI event.  It's raised by the Renderer when the broweser signals that a UI update has completed.  What is isn't is part of the component lifecycle methods.  That's an extremely important distinction.  The calls to <code>StateHasChanged</code> in the component lifecycle may ultimately trigger <code>OnAfterRender{Async}</code>, but that's just a consequence of an action.  There's no direct linkage, and therefore no control over when <code>OnAfterRender{Async}</code> is executed by the <em>synchronisation context</em>.</p>
 </li>
 <li><p>The <em>Blazor Synchronisation Context</em> prioritizes delegates <em>Posted</em> to it's queue over UI event delegates.  It effectively has two queues: the <em>Post</em> queue and the UI queue.  The lifecycle code is posted to the <em>Post</em> queue, <code>OnAfterRender{Async}</code> is queued on the UI event queue.</p>
 </li>
 </ol>
-<p>The demo component is documented at the end of the article.</p>
+<p>The demo console logging component is shown in full at the end of the article.</p>
 <h2 id="a-busy-synchronisation-context">A Busy Synchronisation Context</h2>
-<p>In this section there's a minimal delay.</p>
+<p>In this section an async method with a minimal delay.</p>
 <div style="color:#DADADA;background-color:#1E1E1E;"><pre>
     <span style="color:#569CD6;">protected</span> <span style="color:#569CD6;">async</span> <span style="color:#569CD6;">override</span> Task OnInitializedAsync()
     {
@@ -137,7 +143,30 @@
 <li><p>Changing state in <code>OnAfterRender{Async}</code> means you need to execute one more call to <code>StateHasChanged</code> to update the UI to the current component state.  Why not just execute the code in the lifecycle methods.</p>
 </li>
 </ol>
-<h2 id="the-demo-component">The Demo Component</h2>
+<h2 id="pre-rendering">Pre-Rendering</h2>
+<p>Net8 introduced the RenderMode and brought pre-rendering to the for.  One interesting facet of this is that <code>OnAfterRender{Async}</code> isn't called during pre-render: there's no browser context.  That's makes it an obvious target for code, such as relatively slow external data fetches, that you don't want to run during pre-render.</p>
+<p>Don't fall into the trap.  The reasons for not doing it highlighted above still hold.</p>
+<p>In Net8, you can detect component pre-rendering like this:</p>
+<div style="color:#DADADA;background-color:#1E1E1E;"><pre>
+@code {
+    [CascadingParameter] HttpContext? HttpContext { <span style="color:#569CD6;">get</span>; <span style="color:#569CD6;">set</span>; }
+
+    <span style="color:#569CD6;">private</span> <span style="color:#569CD6;">bool</span> _isPreRender;
+
+    <span style="color:#569CD6;">protected</span> <span style="color:#569CD6;">override</span> <span style="color:#569CD6;">void</span> OnInitialized()
+    {
+        _isPreRender = <span style="color:#569CD6;">this</span>.HttpContext <span style="color:#569CD6;">is</span> not <span style="color:#569CD6;">null</span>;
+    }
+}
+</pre></div>
+<p>The <code>HttpContext</code> is a root level cascade that is only exists when the component is pre-rendering.  In interactive rendering mode, it's <code>null</code>.</p>
+<h2 id="takeaways">Takeaways</h2>
+<p>To summarise what does and doesn't belong in <code>OnAfterRender{Async}</code>:</p>
+<ul>
+<li>If your code needs to interact with the browser through JS, it's in the right place.</li>
+<li>If your code mutates the component state necessitating a render, it belongs elsewhere in <code>OnInitialized{Async}\OnParametersSet{Async}</code>.</li>
+</ul>
+<h2 id="appendix-the-demo-component">Appendix - The Demo Component</h2>
 <p>The following component helps document the process.  It logs when code is executed on the <em>synchronisation context</em>.</p>
 <div style="color:#DADADA;background-color:#1E1E1E;"><pre>
 @page <span style="color:#D69D85;">&quot;/&quot;</span>
